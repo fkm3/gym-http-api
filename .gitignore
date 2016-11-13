@@ -57,6 +57,9 @@ binding-js/dist
 binding-js/node_modules
 binding-js/src/typings
 
-#Rust binding
+# Rust binding
 binding-rust/Cargo.lock
 binding-rust/target
+
+# Haskell binding
+.stack-work
