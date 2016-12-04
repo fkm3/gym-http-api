@@ -15,9 +15,9 @@ module OpenAI.Gym
     ) where
 
 import Control.Exception (bracket)
-import Control.Lens ((^..), (^.), (^?))
+import Control.Lens (Prism', iso, (^..), (^.), (^?))
 import Control.Monad (zipWithM)
-import Data.Aeson.Lens (key, values, _String, _Bool, _Integral, _Double, _Value)
+import Data.Aeson.Lens (key, values, _String, _Bool, _Integral, _Value, _Number, AsNumber, _Double)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
 import Data.Monoid ((<>))
@@ -26,6 +26,7 @@ import Text.Printf (printf)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as B
 import qualified Data.HashMap.Strict as HMap
+import qualified Data.Scientific as Scientific
 import qualified Data.Text as Text
 import qualified Data.Vector.Storable as S
 import qualified Network.Wreq as Wreq
@@ -79,14 +80,14 @@ withEnv' url envID f = withClient url (\c -> withEnv c envID f)
 -- | Specification of an action or observation space.
 data Space = Discrete Int64
              -- ^ Integers in the range [0, n).
-           | Box [Int64] [Double] [Double]
+           | Box [Int64] [Float] [Float]
              -- ^ Multidimensional array of real numbers. The first list
              -- contains the size of each dimension and the other two lists
              -- contain the lower and upper bounds of each element respectively.
            deriving (Show)
 
 -- | Sample a point from a 'Space' at uniform random.
-sample :: Space -> IO (S.Vector Double)
+sample :: Space -> IO (S.Vector Float)
 sample (Discrete n) = S.singleton . fromIntegral <$> randomRIO (0, n - 1)
 sample (Box _ low high) = S.fromList <$> zipWithM (curry randomRIO) low high
 
@@ -104,8 +105,8 @@ getSpace (Client url sess) instanceID urlSuffix = do
                 Just n -> Discrete n
         "Box" ->
             let shape = info ^.. key "shape" . values . _Integral
-                low = info ^.. key "low" . values . _Double
-                high = info ^.. key "high" . values . _Double
+                low = info ^.. key "low" . values . _Float
+                high = info ^.. key "high" . values . _Float
             in if null shape ||
                   fromIntegral (product shape) /= length low ||
                   fromIntegral (product shape) /= length high
@@ -114,22 +115,22 @@ getSpace (Client url sess) instanceID urlSuffix = do
         spaceName -> error $ "Unsupported space name: " <> Text.unpack spaceName
 
 -- | Reset the environment and return the initial observation.
-reset :: Env -> IO (S.Vector Double)
+reset :: Env -> IO (S.Vector Float)
 reset (Env (Client url sess) instanceID _ _) = do
     let reqURL = url <> "/v1/envs/" <> instanceID <> "/reset/"
     resp <- Wreq.asJSON =<< WreqS.post sess reqURL B.empty
     let body = resp ^. Wreq.responseBody :: Aeson.Value
-    return (S.fromList (body ^.. key "observation" . values . _Double))
+    return (S.fromList (body ^.. key "observation" . values . _Float))
 
 data StepResult = StepResult
-    { stepObservation :: S.Vector Double
-    , stepReward :: Double
+    { stepObservation :: S.Vector Float
+    , stepReward :: Float
     , stepDone :: Bool
     }
 
 -- | Perform an action.
 step :: Env
-     -> S.Vector Double  -- ^ Action.
+     -> S.Vector Float  -- ^ Action.
      -> Bool             -- ^ Whether to render the screen.
      -> IO StepResult
 step env@(Env (Client url sess) instanceID _ _) action render = do
@@ -157,8 +158,13 @@ step env@(Env (Client url sess) instanceID _ _) action render = do
     resp <- Wreq.asJSON =<< WreqS.post sess reqURL reqBody
     let body = resp ^. Wreq.responseBody :: Aeson.Value
     return StepResult
-        { stepObservation = S.fromList (body ^.. key "observation" . _Double)
-        , stepReward = fromMaybe 0 (body ^? key "reward" . _Double)
+        { stepObservation =
+              S.fromList (body ^.. key "observation" . values . _Float)
+        , stepReward = fromMaybe 0 (body ^? key "reward" . _Float)
         , stepDone = fromMaybe False (body ^? key "done" . _Bool)
         }
 
+
+_Float :: AsNumber t => Prism' t Float
+_Float = _Number . iso Scientific.toRealFloat realToFrac
+{-# INLINE _Float #-}

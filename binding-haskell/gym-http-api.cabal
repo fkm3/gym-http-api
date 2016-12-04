@@ -24,6 +24,7 @@ library
                      , lens
                      , lens-aeson
                      , random
+                     , scientific
                      , text
                      , unordered-containers
                      , vector
